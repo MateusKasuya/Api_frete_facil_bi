@@ -49,5 +49,5 @@ FROM
 	factrc f
 LEFT JOIN tbfil t ON t.codfil = f.codfilfatur
 LEFT JOIN tbcli c ON c.cgccpfcli = f.cgccpffatura
-LEFT JOIN tbcid_bi cid ON cid.codcid = f.codciddes
+LEFT JOIN tbcid_bi cid ON cid.codcid = f.codcidpagto
 LEFT JOIN tbpro p ON p.codpro = f.codpro

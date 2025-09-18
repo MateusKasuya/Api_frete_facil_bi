@@ -7,6 +7,9 @@ from datetime import date
 class FiltrosBI(BaseModel):
     data_inicio: Optional[date] = None
     data_fim: Optional[date] = None
+    ano: Optional[Union[List[int], int]] = Field(None, description="Ano")
+    mes: Optional[Union[List[int], int]] = Field(None, description="Mês")
+    dia: Optional[Union[List[int], int]] = Field(None, description="Dia")
     
     # Filtros por código (aceita valor único ou lista)
     codfilial: Optional[Union[List[int], int]] = Field(None, description="Código(s) da filial")
@@ -35,6 +38,7 @@ class BigNumbers(BaseModel):
 
 # Schema individual para os dados de cada mês
 class DadosMesAno(BaseModel):
+    mes: str
     volume: float
     embarques: int
     faturamento: float
@@ -53,6 +57,7 @@ class KPIDiaMesAtual(RootModel[Dict[str, DadosDiaMesAtual]]):
     pass
 
 class DadosFilial(BaseModel):
+    filial: str
     volume: float
     embarques: int
     faturamento: float
@@ -71,6 +76,7 @@ class KPIRegiao(RootModel[Dict[str, DadosRegiao]]):
     pass
 
 class DadosCidade(BaseModel):
+    cidade: str
     volume: float
     embarques: int
     faturamento: float
@@ -80,12 +86,14 @@ class KPICidade(RootModel[Dict[str, DadosCidade]]):
     pass
 
 class DadosCliente(BaseModel):
+    cliente: str
     faturamento: float
 # Schema para a estrutura aninhada por dia
 class KPICliente(RootModel[Dict[str, DadosCliente]]):
     pass
 
 class DadosProduto(BaseModel):
+    produto: str
     faturamento: float
 # Schema para a estrutura aninhada por dia
 class KPIProduto(RootModel[Dict[str, DadosProduto]]):
@@ -102,5 +110,11 @@ class TabelaFaturamento(BaseModel):
     coduf: str
     produto: str
 
+class FiltroFilial(BaseModel):
+    codfilial: str
+    filial: str
 
+class FiltroCliente(BaseModel):
+    codcliente: str
+    cliente: str
     

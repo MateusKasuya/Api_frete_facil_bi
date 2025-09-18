@@ -5,7 +5,7 @@ from fastapi.security import OAuth2PasswordBearer
 from app.db.conexaopg import pg_connection_manager
 from app.db.conexaofb import firebird_connection_manager
 from app.auth.auth import decode_access_token
-from app.schemas.BIschemas import FiltrosBI, BigNumbers, KPIMesAno, KPIDiaMesAtual, DadosMesAno, DadosDiaMesAtual, KPIFilial, DadosFilial, KPIRegiao, DadosRegiao, KPICidade, DadosCidade, KPICliente, DadosCliente, KPIProduto, DadosProduto, TabelaFaturamento
+from app.schemas.BIschemas import *
 
 router = APIRouter()
 
@@ -137,6 +137,30 @@ async def get_big_numbers(
             params.extend(codpro)
             params_ano_anterior.extend(codpro)
 
+        ano = normalize_filter(consulta.ano)
+        if ano:
+            placeholders_ano = ', '.join(['?'] * len(ano))
+            query_factrc += f" AND ano_recbto IN ({placeholders_ano})"
+            query_frctrc += f" AND ano_emissao IN ({placeholders_ano})"
+            params.extend(ano)
+            params_ano_anterior.extend(ano)
+
+        mes = normalize_filter(consulta.mes)
+        if mes:
+            placeholders_mes = ', '.join(['?'] * len(mes))
+            query_factrc += f" AND mes_numero IN ({placeholders_mes})"
+            query_frctrc += f" AND mes_numero IN ({placeholders_mes})"
+            params.extend(mes)
+            params_ano_anterior.extend(mes)
+
+        dia = normalize_filter(consulta.dia)
+        if dia:
+            placeholders_dia = ', '.join(['?'] * len(dia))
+            query_factrc += f" AND dia_recbto IN ({placeholders_dia})"
+            query_frctrc += f" AND dia_emissao IN ({placeholders_dia})"
+            params.extend(dia)
+            params_ano_anterior.extend(dia)
+
         cur.execute(query_factrc, tuple(params))
         resultado_factrc = cur.fetchall()
         faturamento = float(resultado_factrc[0][0]) if resultado_factrc and resultado_factrc[0][0] is not None else 0.0
@@ -160,10 +184,7 @@ async def get_big_numbers(
         volumes_ano_anterior = float(resultado_frctrc_ano_anterior[0][2]) if resultado_frctrc_ano_anterior and resultado_frctrc_ano_anterior[0][2] is not None else 0.0
         embarques_ano_anterior = int(resultado_frctrc_ano_anterior[0][3]) if resultado_frctrc_ano_anterior and resultado_frctrc_ano_anterior[0][3] is not None else 0
         faturados_ano_anterior = int(resultado_frctrc_ano_anterior[0][4]) if resultado_frctrc_ano_anterior and resultado_frctrc_ano_anterior[0][4] is not None else 0
-        
-        
-        # Obtém os dados da consulta do ano anterior
-       
+               
         # Combina os resultados
         dados = [
             {
@@ -232,8 +253,8 @@ async def get_kpi_mes_ano(
         query = """
                 SELECT
                     ano,
-                    mes,
                     mes_numero,
+                    mes,
                     SUM(volume),
                     SUM(embarque),
                     SUM(faturamento)
@@ -243,6 +264,7 @@ async def get_kpi_mes_ano(
                         ano_emissao AS ano,
                         mes_emissao AS mes,
                         mes_numero,
+                        dia_emissao AS dia,
                         pesofrete_ton AS volume,
                         embarque AS embarque,
                         0 AS faturamento,
@@ -258,6 +280,7 @@ async def get_kpi_mes_ano(
                         ano_recbto AS ano,
                         mes_recbto AS mes,
                         mes_numero,
+                        dia_recbto AS dia,
                         0 AS volume,
                         0 AS embarque,
                         vlrrecbto AS faturamento,
@@ -307,6 +330,24 @@ async def get_kpi_mes_ano(
             filtros_externos += f" AND CAST(regiao AS VARCHAR(50)) IN ({placeholders_regiao})"
             params.extend(regiao)
 
+        ano = normalize_filter(consulta.ano)
+        if ano:
+            placeholders_ano = ', '.join(['?'] * len(ano))
+            filtros_externos += f" AND ano IN ({placeholders_ano})"
+            params.extend(ano)
+
+        mes = normalize_filter(consulta.mes)
+        if mes:
+            placeholders_mes = ', '.join(['?'] * len(mes))
+            filtros_externos += f" AND mes_numero IN ({placeholders_mes})"
+            params.extend(mes)
+        
+        dia = normalize_filter(consulta.dia)
+        if dia:
+            placeholders_dia = ', '.join(['?'] * len(dia))
+            filtros_externos += f" AND dia IN ({placeholders_dia})"
+            params.extend(dia)
+
         # Inserir filtros no WHERE externo
         query = query.replace(
             "WHERE 1=1",
@@ -320,7 +361,8 @@ async def get_kpi_mes_ano(
         
         for row in cur.fetchall():
             ano = str(int(row[0])) if row[0] is not None else "0"
-            mes = str(row[1]) if row[1] is not None else "Indefinido"
+            mes_numero = str(int(row[1])) if row[1] is not None else "0"
+            mes = str(row[2]) if row[2] is not None else "Indefinido"
             volume = float(row[3]) if row[3] is not None else 0.0
             embarques = int(row[4]) if row[4] is not None else 0
             faturamento = float(row[5]) if row[5] is not None else 0.0
@@ -330,12 +372,13 @@ async def get_kpi_mes_ano(
                 dados[ano] = {}
             
             # Adiciona os dados do mês
-            dados[ano][mes] = DadosMesAno(
+            dados[ano][mes_numero] = DadosMesAno(
+                mes=mes,
                 volume=volume,
                 embarques=embarques,
                 faturamento=faturamento
             )
-
+        
         if not dados:
             # Para BI: retorna estrutura vazia em vez de erro 404
             return {}
@@ -378,7 +421,9 @@ async def get_kpi_dia_mes_atual(
                         0 AS faturamento,
                         codfilial,
                         codcid,
-                        regiao
+                        regiao,
+                        mes_numero,
+                        ano_emissao AS ano
                 FROM
                     FRCTRC_BI
                 WHERE
@@ -392,7 +437,9 @@ async def get_kpi_dia_mes_atual(
                         vlrrecbto AS faturamento,
                         codfilial,
                         codcid,
-                        regiao
+                        regiao,
+                        mes_numero,
+                        ano_recbto AS ano
                     FROM
                         FACTRC_BI
                     WHERE
@@ -433,6 +480,24 @@ async def get_kpi_dia_mes_atual(
             placeholders_regiao = ', '.join(['?'] * len(regiao))
             filtros_externos += f" AND CAST(regiao AS VARCHAR(50)) IN ({placeholders_regiao})"
             params.extend(regiao)
+
+        ano = normalize_filter(consulta.ano)
+        if ano:
+            placeholders_ano = ', '.join(['?'] * len(ano))
+            filtros_externos += f" AND ano IN ({placeholders_ano})"
+            params.extend(ano)
+
+        mes = normalize_filter(consulta.mes)
+        if mes:
+            placeholders_mes = ', '.join(['?'] * len(mes))
+            filtros_externos += f" AND mes_numero IN ({placeholders_mes})"
+            params.extend(mes)
+
+        dia = normalize_filter(consulta.dia)
+        if dia:
+            placeholders_dia = ', '.join(['?'] * len(dia))
+            filtros_externos += f" AND dia IN ({placeholders_dia})"
+            params.extend(dia)
 
         # Inserir filtros no WHERE externo
         query = query.replace(
@@ -492,6 +557,7 @@ async def get_kpi_filial(
 
         query= """
         SELECT
+            codfilial,
             filial,
             SUM(volume),
             SUM(embarques),
@@ -508,7 +574,10 @@ async def get_kpi_filial(
                 codcid,
                 regiao,
                 codpro,
-                datarecbto AS data_operacao
+                datarecbto AS data_operacao,
+                dia_recbto AS dia,
+                mes_numero,
+                ano_recbto AS ano
             FROM
                 FACTRC_BI
         UNION ALL
@@ -522,12 +591,16 @@ async def get_kpi_filial(
                 codcid,
                 regiao,
                 codpro,
-                dataemissao AS data_operacao
+                dataemissao AS data_operacao,
+                dia_emissao AS dia,
+                mes_numero,
+                ano_emissao AS ano
             FROM
                 FRCTRC_BI
         ) dados
         WHERE data_operacao >= ? AND data_operacao <= ?
         GROUP BY
+            codfilial,
             filial
         ORDER BY SUM(faturamento) DESC
         """
@@ -545,6 +618,9 @@ async def get_kpi_filial(
         codcid = normalize_filter(consulta.codcid)
         regiao = normalize_filter(consulta.regiao)
         codpro = normalize_filter(consulta.codpro)
+        ano = normalize_filter(consulta.ano)
+        mes = normalize_filter(consulta.mes)
+        dia = normalize_filter(consulta.dia)
 
         # Aplicar filtros por filial
         if codfilial:
@@ -576,32 +652,55 @@ async def get_kpi_filial(
             filtros_externos += f" AND codpro IN ({placeholders_codpro})"
             params.extend(codpro)
 
+        # Aplicar filtros por ano
+
+        if ano:
+            placeholders_ano = ', '.join(['?'] * len(ano))
+            filtros_externos += f" AND ano IN ({placeholders_ano})"
+            params.extend(ano)
+
+        # Aplicar filtros por mes
+
+        if mes:
+            placeholders_mes = ', '.join(['?'] * len(mes))
+            filtros_externos += f" AND mes_numero IN ({placeholders_mes})"
+            params.extend(mes)
+
+        # Aplicar filtros por dia
+
+        if dia:
+            placeholders_dia = ', '.join(['?'] * len(dia))
+            filtros_externos += f" AND dia IN ({placeholders_dia})"
+            params.extend(dia)
+
         # Inserir filtros no WHERE externo
         query = query.replace(
             "WHERE data_operacao >= ? AND data_operacao <= ?",
             f"WHERE data_operacao >= ? AND data_operacao <= ?{filtros_externos}"
         )
 
-        cur.execute(query, params)
+        cur.execute(query, tuple(params))
 
-                # Dicionário para armazenar os dados organizados por filial
+        # Dicionário para armazenar os dados organizados por filial
         dados = {}
 
         for row in cur.fetchall():
-            filial = str(row[0]) if row[0] is not None else None
-            volume = float(row[1]) if row[1] is not None else 0.0
-            embarques = int(row[2]) if row[2] is not None else 0
-            faturamento = float(row[3]) if row[3] is not None else 0.0
+            codfilial = str(row[0]) if row[0] is not None else None
+            filial = str(row[1]) if row[1] is not None else None
+            volume = float(row[2]) if row[2] is not None else 0.0
+            embarques = int(row[3]) if row[3] is not None else 0
+            faturamento = float(row[4]) if row[4] is not None else 0.0
             
             # Adiciona os dados do filial
-            dados[filial] = DadosFilial(
+            dados[codfilial] = DadosFilial(
+                filial=filial,
                 volume=volume,
                 embarques=embarques,
                 faturamento=faturamento
             )
 
         if not dados:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum dado encontrado")
+            return {}
         
         return dados
 
@@ -649,7 +748,10 @@ async def get_kpi_regiao(
                 codcliente,
                 codcid,
                 codpro,
-                datarecbto AS data_operacao
+                datarecbto AS data_operacao,
+                dia_recbto AS dia,
+                mes_numero,
+                ano_recbto AS ano
         FROM
             FACTRC_BI
         UNION ALL
@@ -662,7 +764,10 @@ async def get_kpi_regiao(
                 codcliente,
                 codcid,
                 codpro,
-                dataemissao AS data_operacao
+                dataemissao AS data_operacao,
+                dia_emissao AS dia,
+                mes_numero,
+                ano_emissao AS ano
             FROM
                 FRCTRC_BI
         ) dados
@@ -685,6 +790,9 @@ async def get_kpi_regiao(
         codcid = normalize_filter(consulta.codcid)
         regiao = normalize_filter(consulta.regiao)
         codpro = normalize_filter(consulta.codpro)
+        ano = normalize_filter(consulta.ano)
+        mes = normalize_filter(consulta.mes)
+        dia = normalize_filter(consulta.dia)
 
         # Aplicar filtros por filial
         if codfilial:
@@ -716,13 +824,34 @@ async def get_kpi_regiao(
             filtros_externos += f" AND codpro IN ({placeholders_codpro})"
             params.extend(codpro)
 
+        # Aplicar filtros por ano
+
+        if ano:
+            placeholders_ano = ', '.join(['?'] * len(ano))
+            filtros_externos += f" AND ano IN ({placeholders_ano})"
+            params.extend(ano)
+
+        # Aplicar filtros por mes
+
+        if mes:
+            placeholders_mes = ', '.join(['?'] * len(mes))
+            filtros_externos += f" AND mes_numero IN ({placeholders_mes})"
+            params.extend(mes)
+
+        # Aplicar filtros por dia
+
+        if dia:
+            placeholders_dia = ', '.join(['?'] * len(dia))
+            filtros_externos += f" AND dia IN ({placeholders_dia})"
+            params.extend(dia)
+
         # Inserir filtros no WHERE externo
         query = query.replace(
             "WHERE data_operacao >= ? AND data_operacao <= ?",
             f"WHERE data_operacao >= ? AND data_operacao <= ?{filtros_externos}"
         )
 
-        cur.execute(query, params)
+        cur.execute(query, tuple(params))
 
                 # Dicionário para armazenar os dados organizados por regiao
         dados = {}
@@ -774,6 +903,7 @@ async def get_kpi_cidade(
 
         query= """
             SELECT
+                codcid,
                 cidade || '-' || coduf,
                 SUM(volume),
                 SUM(embarques),
@@ -789,7 +919,10 @@ async def get_kpi_cidade(
                     codfilial,
                     codcid,
                     regiao,
-                    datarecbto AS data_operacao
+                    datarecbto AS data_operacao,
+                    dia_recbto AS dia,
+                    mes_numero,
+                    ano_recbto AS ano
                 FROM
                     FACTRC_BI
             UNION ALL
@@ -802,12 +935,16 @@ async def get_kpi_cidade(
                     codfilial,
                     codcid,
                     regiao,
-                    dataemissao AS data_operacao
+                    dataemissao AS data_operacao,
+                    dia_emissao AS dia,
+                    mes_numero,
+                    ano_emissao AS ano
                 FROM
                     FRCTRC_BI
             ) dados
             WHERE data_operacao >= ? AND data_operacao <= ?
             GROUP BY
+                codcid,
                 cidade || '-' || coduf
             ORDER BY SUM(faturamento) DESC
         """
@@ -823,6 +960,9 @@ async def get_kpi_cidade(
         codfilial = normalize_filter(consulta.codfilial)
         codcid = normalize_filter(consulta.codcid)
         regiao = normalize_filter(consulta.regiao)
+        ano = normalize_filter(consulta.ano)
+        mes = normalize_filter(consulta.mes)
+        dia = normalize_filter(consulta.dia)
 
         # Aplicar filtros por filial
         if codfilial:
@@ -842,25 +982,48 @@ async def get_kpi_cidade(
             filtros_externos += f" AND CAST(regiao AS VARCHAR(50)) IN ({placeholders_regiao})"
             params.extend(regiao)
 
+        # Aplicar filtros por ano
+
+        if ano:
+            placeholders_ano = ', '.join(['?'] * len(ano))
+            filtros_externos += f" AND ano IN ({placeholders_ano})"
+            params.extend(ano)
+
+        # Aplicar filtros por mes
+
+        if mes:
+            placeholders_mes = ', '.join(['?'] * len(mes))
+            filtros_externos += f" AND mes_numero IN ({placeholders_mes})"
+            params.extend(mes)
+
+        # Aplicar filtros por dia
+
+        if dia:
+            placeholders_dia = ', '.join(['?'] * len(dia))
+            filtros_externos += f" AND dia IN ({placeholders_dia})"
+            params.extend(dia)
+
         # Inserir filtros no WHERE externo
         query = query.replace(
             "WHERE data_operacao >= ? AND data_operacao <= ?",
             f"WHERE data_operacao >= ? AND data_operacao <= ?{filtros_externos}"
         )
 
-        cur.execute(query, params)
+        cur.execute(query, tuple(params))
 
                 # Dicionário para armazenar os dados organizados por cidade
         dados = {}
 
         for row in cur.fetchall():
-            cidade = str(row[0]) if row[0] is not None else None
-            volume = float(row[1]) if row[1] is not None else 0.0
-            embarques = int(row[2]) if row[2] is not None else 0
-            faturamento = float(row[3]) if row[3] is not None else 0.0
+            codcid = str(row[0]) if row[0] is not None else None
+            cidade = str(row[1]) if row[1] is not None else None
+            volume = float(row[2]) if row[2] is not None else 0.0
+            embarques = int(row[3]) if row[3] is not None else 0
+            faturamento = float(row[4]) if row[4] is not None else 0.0
             
             # Adiciona os dados do cidade
-            dados[cidade] = DadosCidade(
+            dados[codcid] = DadosCidade(
+                cidade=cidade,
                 volume=volume,
                 embarques=embarques,
                 faturamento=faturamento
@@ -900,6 +1063,7 @@ async def get_kpi_cliente(
 
         query= """
             SELECT
+                codcliente,
                 cliente,
                 SUM(vlrrecbto)
             FROM
@@ -914,10 +1078,10 @@ async def get_kpi_cliente(
                     datarecbto
                 FROM
                     FACTRC_BI
-            )
-            WHERE
-                datarecbto >= ? AND datarecbto <= ?
+            ) dados
+            WHERE datarecbto >= ? AND datarecbto <= ?
             GROUP BY
+                codcliente,
                 cliente
             ORDER BY
                 SUM(vlrrecbto) DESC
@@ -966,22 +1130,25 @@ async def get_kpi_cliente(
             f"WHERE datarecbto >= ? AND datarecbto <= ?{filtros_externos}"
         )
 
-        cur.execute(query, params)
+
+        cur.execute(query, tuple(params))
 
                 # Dicionário para armazenar os dados organizados por cliente
         dados = {}
 
         for row in cur.fetchall():
-            cliente = str(row[0]) if row[0] is not None else None
-            faturamento = float(row[1]) if row[1] is not None else 0.0
+            codcliente = str(row[0]) if row[0] is not None else None
+            cliente = str(row[1]) if row[1] is not None else None
+            faturamento = float(row[2]) if row[2] is not None else 0.0
             
             # Adiciona os dados do cliente
-            dados[cliente] = DadosCliente(
+            dados[codcliente] = DadosCliente(
+                cliente=cliente,
                 faturamento=faturamento
             )
 
         if not dados:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum dado encontrado")
+            return {}
         
         return dados
 
@@ -1014,6 +1181,7 @@ async def get_kpi_produto(
 
         query= """
             SELECT
+                codpro,
                 produto,
                 SUM(vlrrecbto)
             FROM
@@ -1029,9 +1197,9 @@ async def get_kpi_produto(
                 FROM
                     FACTRC_BI
             )
-            WHERE
-                datarecbto >= ? AND datarecbto <= ?
+            WHERE datarecbto >= ? AND datarecbto <= ?
             GROUP BY
+                codpro,
                 produto
             ORDER BY
                 SUM(vlrrecbto) DESC
@@ -1080,17 +1248,19 @@ async def get_kpi_produto(
             f"WHERE datarecbto >= ? AND datarecbto <= ?{filtros_externos}"
         )
 
-        cur.execute(query, params)
+        cur.execute(query, tuple(params))
 
                 # Dicionário para armazenar os dados organizados por produto
         dados = {}
 
         for row in cur.fetchall():
-            produto = str(row[0]) if row[0] is not None else None
-            faturamento = float(row[1]) if row[1] is not None else 0.0
+            codpro = str(row[0]) if row[0] is not None else None
+            produto = str(row[1]) if row[1] is not None else None
+            faturamento = float(row[2]) if row[2] is not None else 0.0
             
             # Adiciona os dados do produto
-            dados[produto] = DadosProduto(
+            dados[codpro] = DadosProduto(
+                produto=produto,
                 faturamento=faturamento
             )
 
@@ -1185,7 +1355,7 @@ async def get_tabela_faturamento(
             f"WHERE datarecbto >= ? AND datarecbto <= ?{filtros_externos}"
         )
 
-        cur.execute(query, params)
+        cur.execute(query, tuple(params))
                      # Combina os resultados
         dados = [
             {
@@ -1198,6 +1368,98 @@ async def get_tabela_faturamento(
                 "cidade": str(row[6]) if row[6] is not None else None,
                 "coduf": str(row[7]) if row[7] is not None else None,
                 "produto": str(row[8]) if row[8] is not None else None
+            }
+            for row in cur.fetchall()
+        ]
+              
+
+        if not dados:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum dado encontrado")
+        
+        return dados
+
+@router.get("/bi/filtro_filial", tags=["BI"], response_model=List[FiltroFilial], status_code=status.HTTP_200_OK)
+async def get_filtro_filial(
+    token: str = Depends(oauth2_scheme)
+):
+
+    """
+        Consulta filtro filial usando GET com schema de entrada.
+    """
+
+  # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+
+        query= """
+            SELECT
+                codfil,
+                nome
+            FROM
+                TBFIL
+        """
+
+        cur.execute(query)
+
+        dados = [
+            {
+                "codfilial": str(row[0]) if row[0] is not None else None,
+                "filial": str(row[1]) if row[1] is not None else None
+            }
+            for row in cur.fetchall()
+        ]
+              
+
+        if not dados:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum dado encontrado")
+        
+        return dados
+
+@router.get("/bi/filtro_cliente", tags=["BI"], response_model=List[FiltroCliente], status_code=status.HTTP_200_OK)
+async def get_filtro_cliente(
+    token: str = Depends(oauth2_scheme)
+):
+
+    """
+        Consulta filtro cliente usando GET com schema de entrada.
+    """
+
+  # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+
+        query= """
+            SELECT
+                cgccpfcli,
+                nomefantasia
+            FROM
+                TBCLI
+        """
+
+        cur.execute(query)
+
+        dados = [
+            {
+                "codcliente": str(row[0]) if row[0] is not None else None,
+                "cliente": str(row[1]) if row[1] is not None else None
             }
             for row in cur.fetchall()
         ]
