@@ -117,4 +117,17 @@ class FiltroFilial(BaseModel):
 class FiltroCliente(BaseModel):
     codcliente: str
     cliente: str
+
+class BigNumbersContasReceber(BaseModel):
+    faturamento: float
+    a_receber: float
+    em_atraso: float
+    prazo_medio: float
     
+class DadosRecebimentosDiaMesAtual(BaseModel):
+    faturamento: float
+    a_receber: float
+
+# Schema para a estrutura aninhada por dia
+class RecebimentosDiaMesAtual(RootModel[Dict[str, DadosRecebimentosDiaMesAtual]]):
+    pass

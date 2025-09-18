@@ -1,5 +1,5 @@
-DROP VIEW FRCTRC_BI;
-CREATE VIEW FRCTRC_BI AS
+DROP VIEW VWFRCTRC_BI;
+CREATE VIEW VWFRCTRC_BI AS
 SELECT
 	f.nroctrc,
 	f.ufctrc,
@@ -47,6 +47,6 @@ FROM
 	frctrc f
 LEFT JOIN tbfil t ON t.codfil = f.codfilemite
 LEFT JOIN tbcli c ON f.cgccpfdestina = c.cgccpfcli
-LEFT JOIN tbcid_bi cid ON cid.codcid = f.codciddes
+LEFT JOIN vwtbcid_bi cid ON cid.codcid = f.codciddes
 WHERE
 	f.situacao IN ('N', 'F')

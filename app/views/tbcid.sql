@@ -1,4 +1,4 @@
-CREATE VIEW TBCID_BI AS
+CREATE VIEW VWTBCID_BI AS
 SELECT
 	codcid,
 	nome AS cidade,

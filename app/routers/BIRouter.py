@@ -71,7 +71,7 @@ async def get_big_numbers(
             SELECT
 	            SUM(vlrrecbto)
             FROM
-	            factrc_bi
+	            vwfactrc_bi
             WHERE
                 datarecbto >= ?
                 AND datarecbto <= ?
@@ -86,7 +86,7 @@ async def get_big_numbers(
                 SUM(embarque),
                 SUM(faturado)
             FROM
-                frctrc_bi
+                vwfrctrc_bi
             WHERE
                 dataemissao >= ?
                 AND dataemissao <= ?
@@ -272,7 +272,7 @@ async def get_kpi_mes_ano(
                         codcid,
                         regiao
                     FROM
-                        FRCTRC_BI
+                        VWFRCTRC_BI
                     WHERE
                         ano_emissao >= EXTRACT(YEAR FROM CURRENT_TIMESTAMP) - 2
                 UNION ALL
@@ -288,7 +288,7 @@ async def get_kpi_mes_ano(
                         codcid,
                         regiao
                     FROM
-                        FACTRC_BI
+                        VWFACTRC_BI
                     WHERE
                         ano_recbto >= EXTRACT(YEAR FROM CURRENT_TIMESTAMP) - 2
                 ) dados
@@ -378,7 +378,7 @@ async def get_kpi_mes_ano(
                 embarques=embarques,
                 faturamento=faturamento
             )
-        
+
         if not dados:
             # Para BI: retorna estrutura vazia em vez de erro 404
             return {}
@@ -425,7 +425,7 @@ async def get_kpi_dia_mes_atual(
                         mes_numero,
                         ano_emissao AS ano
                 FROM
-                    FRCTRC_BI
+                    VWFRCTRC_BI
                 WHERE
                     ano_emissao = EXTRACT(YEAR FROM CURRENT_TIMESTAMP)
                     AND mes_numero = EXTRACT(MONTH FROM CURRENT_TIMESTAMP)
@@ -441,7 +441,7 @@ async def get_kpi_dia_mes_atual(
                         mes_numero,
                         ano_recbto AS ano
                     FROM
-                        FACTRC_BI
+                        VWFACTRC_BI
                     WHERE
                         ano_recbto = EXTRACT(YEAR FROM CURRENT_TIMESTAMP)
                         AND mes_numero = EXTRACT(MONTH FROM CURRENT_TIMESTAMP)
@@ -579,7 +579,7 @@ async def get_kpi_filial(
                 mes_numero,
                 ano_recbto AS ano
             FROM
-                FACTRC_BI
+                VWFACTRC_BI
         UNION ALL
             SELECT
                 filial,
@@ -596,7 +596,7 @@ async def get_kpi_filial(
                 mes_numero,
                 ano_emissao AS ano
             FROM
-                FRCTRC_BI
+                VWFRCTRC_BI
         ) dados
         WHERE data_operacao >= ? AND data_operacao <= ?
         GROUP BY
@@ -753,7 +753,7 @@ async def get_kpi_regiao(
                 mes_numero,
                 ano_recbto AS ano
         FROM
-            FACTRC_BI
+            VWFACTRC_BI
         UNION ALL
             SELECT
                 regiao,
@@ -769,7 +769,7 @@ async def get_kpi_regiao(
                 mes_numero,
                 ano_emissao AS ano
             FROM
-                FRCTRC_BI
+                VWFRCTRC_BI
         ) dados
         WHERE data_operacao >= ? AND data_operacao <= ?
         GROUP BY
@@ -924,7 +924,7 @@ async def get_kpi_cidade(
                     mes_numero,
                     ano_recbto AS ano
                 FROM
-                    FACTRC_BI
+                    VWFACTRC_BI
             UNION ALL
                 SELECT
                     cidade,
@@ -940,7 +940,7 @@ async def get_kpi_cidade(
                     mes_numero,
                     ano_emissao AS ano
                 FROM
-                    FRCTRC_BI
+                    VWFRCTRC_BI
             ) dados
             WHERE data_operacao >= ? AND data_operacao <= ?
             GROUP BY
@@ -1077,7 +1077,7 @@ async def get_kpi_cliente(
                     codpro,
                     datarecbto
                 FROM
-                    FACTRC_BI
+                    VWFACTRC_BI
             ) dados
             WHERE datarecbto >= ? AND datarecbto <= ?
             GROUP BY
@@ -1195,7 +1195,7 @@ async def get_kpi_produto(
                     codpro,
                     datarecbto
                 FROM
-                    FACTRC_BI
+                    VWFACTRC_BI
             )
             WHERE datarecbto >= ? AND datarecbto <= ?
             GROUP BY
@@ -1308,7 +1308,7 @@ async def get_tabela_faturamento(
                 coduf,
                 produto
             FROM
-                factrc_bi
+                vwfactrc_bi
             WHERE datarecbto >= ? AND datarecbto <= ?
         """
 
@@ -1467,5 +1467,217 @@ async def get_filtro_cliente(
 
         if not dados:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum dado encontrado")
+        
+        return dados
+
+@router.post("/bi/big_numbers_contas_receber", tags=["BI"], response_model=List[BigNumbersContasReceber], status_code=status.HTTP_200_OK)
+async def get_big_numbers_contas_receber(
+    consulta: FiltrosBI = FiltrosBI(),
+    token: str = Depends(oauth2_scheme)
+):
+
+    """
+    Consulta big numbers contas receber usando POST com schema de entrada.
+    Permite consultas mais complexas no futuro.
+    """
+    # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+
+        # ← AQUI usa os campos do schema
+        data_fim = consulta.data_fim or date.today()
+        data_inicio = consulta.data_inicio or (data_fim - timedelta(days=30))
+
+        # Normalizar filtros para aplicar em todas as queries
+        codfilial = normalize_filter(consulta.codfilial)
+        codcliente = normalize_filter(consulta.codcliente)
+
+        # Construir filtros adicionais para aplicar nas queries
+        filtros_adicionais = ""
+        params_filtros = []
+
+        if codfilial:
+            placeholders_filial = ', '.join(['?'] * len(codfilial))
+            filtros_adicionais += f" AND codfilial IN ({placeholders_filial})"
+            params_filtros.extend(codfilial)
+
+        if codcliente:
+            placeholders_cliente = ', '.join(['?'] * len(codcliente))
+            filtros_adicionais += f" AND codcliente IN ({placeholders_cliente})"
+            params_filtros.extend(codcliente)
+
+        # 1. FATURAMENTO: Filtrado por período de recebimento
+        query_faturamento = f"""
+            SELECT COALESCE(SUM(vlrrecbto), 0) AS faturamento
+            FROM VWFACTRC_BI
+            WHERE datarecbto >= ? AND datarecbto <= ?{filtros_adicionais}
+        """
+        params_faturamento = [data_inicio, data_fim] + params_filtros
+
+        # 2. A RECEBER: Filtrado por período de vencimento
+        query_a_receber = f"""
+            SELECT COALESCE(SUM(vlrsaldo), 0) AS a_receber
+            FROM VWFACTRC_BI
+            WHERE condicao_fatura = 'A Receber'
+              AND datavencto >= ? AND datavencto <= ?{filtros_adicionais}
+        """
+        params_a_receber = [data_inicio, data_fim] + params_filtros
+
+        # 3. EM ATRASO: SEM filtro de data (sempre atual)
+        query_em_atraso = f"""
+            SELECT COALESCE(SUM(vlrsaldo), 0) AS em_atraso
+            FROM VWFACTRC_BI
+            WHERE condicao_fatura = 'Em Atraso'{filtros_adicionais}
+        """
+        params_em_atraso = params_filtros
+
+        # 4. PRAZO MÉDIO: Filtrado por período de recebimento
+        query_prazo_medio = f"""
+            SELECT COALESCE(AVG(dias_recebimento), 0) AS prazo_medio
+            FROM VWFACTRC_BI
+            WHERE datarecbto >= ? AND datarecbto <= ?
+              AND dias_recebimento IS NOT NULL{filtros_adicionais}
+        """
+        params_prazo_medio = [data_inicio, data_fim] + params_filtros
+
+        # Executar queries separadamente
+        cur.execute(query_faturamento, tuple(params_faturamento))
+        faturamento = cur.fetchone()[0] or 0.0
+
+        cur.execute(query_a_receber, tuple(params_a_receber))
+        a_receber = cur.fetchone()[0] or 0.0
+
+        cur.execute(query_em_atraso, tuple(params_em_atraso))
+        em_atraso = cur.fetchone()[0] or 0.0
+
+        cur.execute(query_prazo_medio, tuple(params_prazo_medio))
+        prazo_medio = cur.fetchone()[0] or 0.0
+
+        # Retornar dados combinados
+        dados = [
+            {
+                "faturamento": float(faturamento),
+                "a_receber": float(a_receber),
+                "em_atraso": float(em_atraso),
+                "prazo_medio": float(prazo_medio)
+            }
+        ]
+        
+        return dados
+
+@router.post('/bi/recebimentos_dia_mes_atual', tags=["BI"], response_model=RecebimentosDiaMesAtual, status_code=status.HTTP_200_OK)
+async def get_recebimentos_dia_mes_atual(
+    consulta: FiltrosBI = FiltrosBI(),
+    token: str = Depends(oauth2_scheme)
+):
+    """
+    Consulta Grafico dia e mes atual de recebimentos usando POST com schema de entrada.
+    Permite consultas mais complexas no futuro.
+    """
+    # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+        query = """
+                    SELECT
+                        dia,
+                        SUM(faturamento),
+                        SUM(a_receber)
+                    FROM
+                        (
+                        SELECT
+                            dia_recbto AS dia,
+                            vlrrecbto AS faturamento,
+                            0 AS a_receber,
+                            codfilial,
+                            codcliente
+                        FROM
+                            VWFACTRC_BI
+                        WHERE
+                            ano_recbto = EXTRACT(YEAR FROM CURRENT_TIMESTAMP)
+                            AND mes_numero = EXTRACT(MONTH FROM CURRENT_TIMESTAMP)
+                    UNION ALL
+                        SELECT
+                            dia_vencto AS dia,
+                            0 AS faturamento,
+                            vlrsaldo AS a_receber,
+                            codfilial,
+                            codcliente
+                        FROM
+                            VWFACTRC_BI
+                        WHERE
+                            ano_vencto = EXTRACT(YEAR FROM CURRENT_TIMESTAMP)
+                            AND mes_numero_vencto = EXTRACT(MONTH FROM CURRENT_TIMESTAMP)
+                            AND condicao_fatura = 'A Receber'
+                    ) dados
+                    WHERE 1=1
+                    GROUP BY
+                        dia
+                    ORDER BY
+                        dia
+        """
+
+        params = []
+
+        # Aplicar filtros no WHERE externo (após o UNION) - igual kpi_mes_ano
+        filtros_externos = ""
+        
+        # Normalizar filtros
+        codfilial = normalize_filter(consulta.codfilial)
+        codcliente = normalize_filter(consulta.codcliente)
+
+        # Aplicar filtros por filial
+        if codfilial:
+            placeholders_filial = ', '.join(['?'] * len(codfilial))
+            filtros_externos += f" AND codfilial IN ({placeholders_filial})"
+            params.extend(codfilial)
+
+        # Aplicar filtros por cliente
+        if codcliente:
+            placeholders_codcliente = ', '.join(['?'] * len(codcliente))
+            filtros_externos += f" AND codcliente IN ({placeholders_codcliente})"
+            params.extend(codcliente)
+
+        # Inserir filtros no WHERE externo
+        query = query.replace(
+            "WHERE 1=1",
+            f"WHERE 1=1{filtros_externos}"
+        )
+
+        cur.execute(query, tuple(params))
+
+        # Dicionário para armazenar os dados organizados por dia
+        dados = {}
+
+        for row in cur.fetchall():
+            dia = str(int(row[0])) if row[0] is not None else "0"
+            faturamento = float(row[1]) if row[1] is not None else 0.0
+            a_receber = float(row[2]) if row[2] is not None else 0.0
+            
+            # Adiciona os dados do dia
+            dados[dia] = RecebimentosDiaMesAtual(
+                faturamento=faturamento,
+                a_receber=a_receber
+            )
+
+        if not dados:
+            return {}
         
         return dados

@@ -1,5 +1,5 @@
-DROP VIEW FACTRC_BI;
-CREATE VIEW FACTRC_BI AS
+DROP VIEW VWFACTRC_BI;
+CREATE VIEW VWFACTRC_BI AS
 SELECT
 	f.nrofatura,
 	f.anofatura,
@@ -33,6 +33,9 @@ SELECT
 	EXTRACT(MONTH FROM f.datarecbto) mes_numero,
 	EXTRACT(YEAR FROM f.datarecbto) ano_recbto,
 	EXTRACT(DAY FROM f.datarecbto) dia_recbto,
+	EXTRACT(DAY FROM f.datavencto) dia_vencto,
+	EXTRACT(MONTH FROM f.datavencto) mes_numero_vencto,
+	EXTRACT(YEAR FROM f.datavencto) ano_vencto,
 	f.datarecbto - f.dataemissao AS dias_recebimento,
 	f.vlrfatura,
 	f.vlrrecbto,
@@ -49,5 +52,5 @@ FROM
 	factrc f
 LEFT JOIN tbfil t ON t.codfil = f.codfilfatur
 LEFT JOIN tbcli c ON c.cgccpfcli = f.cgccpffatura
-LEFT JOIN tbcid_bi cid ON cid.codcid = f.codcidpagto
+LEFT JOIN vwtbcid_bi cid ON cid.codcid = f.codcidpagto
 LEFT JOIN tbpro p ON p.codpro = f.codpro
