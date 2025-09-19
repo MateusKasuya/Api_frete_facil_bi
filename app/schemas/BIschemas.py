@@ -131,3 +131,19 @@ class DadosRecebimentosDiaMesAtual(BaseModel):
 # Schema para a estrutura aninhada por dia
 class RecebimentosDiaMesAtual(RootModel[Dict[str, DadosRecebimentosDiaMesAtual]]):
     pass
+
+class DadosAReceberCliente(BaseModel):
+    cliente: str
+    a_receber: float
+# Schema para a estrutura aninhada por dia
+class AReceberCliente(RootModel[Dict[str, DadosAReceberCliente]]):
+    pass
+
+class TabelaAReceber(BaseModel):
+    datavencto: date
+    cliente: str
+    cidade: str
+    coduf: str
+    produto: str
+    a_receber: float
+    conta: str

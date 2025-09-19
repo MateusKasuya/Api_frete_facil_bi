@@ -47,10 +47,12 @@ SELECT
 		ELSE 'A Receber'
 	END AS condicao_fatura,
 	f.contareduz,
-	f.codtransacao
+	f.codtransacao,
+	cta.nomeconta AS conta
 FROM
 	factrc f
 LEFT JOIN tbfil t ON t.codfil = f.codfilfatur
 LEFT JOIN tbcli c ON c.cgccpfcli = f.cgccpffatura
 LEFT JOIN vwtbcid_bi cid ON cid.codcid = f.codcidpagto
 LEFT JOIN tbpro p ON p.codpro = f.codpro
+LEFT JOIN tbcta cta ON cta.contareduz = f.contareduz

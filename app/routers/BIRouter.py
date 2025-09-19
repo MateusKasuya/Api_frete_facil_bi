@@ -1681,3 +1681,207 @@ async def get_recebimentos_dia_mes_atual(
             return {}
         
         return dados
+
+@router.post("/bi/a_receber_cliente", tags=["BI"], response_model=AReceberCliente, status_code=status.HTTP_200_OK)
+async def get_a_receber_cliente(
+    consulta: FiltrosBI = FiltrosBI(),
+    token: str = Depends(oauth2_scheme)
+):
+
+    """
+    Consulta a receber cliente usando POST com schema de entrada.
+    Permite consultas mais complexas no futuro.
+    """
+    # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+
+        # ← AQUI usa os campos do schema
+        data_fim = consulta.data_fim or date.today()
+        data_inicio = consulta.data_inicio or (data_fim - timedelta(days=30))
+
+        query= """
+            SELECT
+                codcliente,
+                cliente,
+                SUM(vlrsaldo)
+            FROM
+                (
+                SELECT
+                    cliente,
+                    vlrsaldo,
+                    codfilial,
+                    codcliente,
+                    datavencto
+                FROM
+                    VWFACTRC_BI
+            ) dados
+            WHERE datavencto >= ? AND datavencto <= ?
+            GROUP BY
+                codcliente,
+                cliente
+            ORDER BY
+                SUM(vlrsaldo) DESC
+        """
+
+        params = []
+
+        # Aplicar filtros no WHERE externo (mesma lógica dos outros endpoints)
+        filtros_externos = ""
+        
+        params.extend([data_inicio, data_fim])
+        
+        # Normalizar filtros
+        codfilial = normalize_filter(consulta.codfilial)
+        codcliente = normalize_filter(consulta.codcliente)
+
+        # Aplicar filtros por filial
+        if codfilial:
+            placeholders_filial = ', '.join(['?'] * len(codfilial))
+            filtros_externos += f" AND codfilial IN ({placeholders_filial})"
+            params.extend(codfilial)
+
+        # Aplicar filtros por cliente
+        if codcliente:
+            placeholders_cliente = ', '.join(['?'] * len(codcliente))
+            filtros_externos += f" AND codcliente IN ({placeholders_cliente})"
+            params.extend(codcliente)
+
+        # Inserir filtros no WHERE externo
+        query = query.replace(
+            "WHERE datavencto >= ? AND datavencto <= ?",
+            f"WHERE datavencto >= ? AND datavencto <= ?{filtros_externos}"
+        )
+
+
+        cur.execute(query, tuple(params))
+
+                # Dicionário para armazenar os dados organizados por cliente
+        dados = {}
+
+        for row in cur.fetchall():
+            codcliente = str(row[0]) if row[0] is not None else None
+            cliente = str(row[1]) if row[1] is not None else None
+            a_receber = float(row[2]) if row[2] is not None else 0.0
+            
+            # Adiciona os dados do cliente
+            dados[codcliente] = DadosAReceberCliente(
+                cliente=cliente,
+                a_receber=a_receber
+            )
+
+        if not dados:
+            return {}
+        
+        return dados
+
+@router.post("/bi/tabela_a_receber", tags=["BI"], response_model=List[TabelaAReceber], status_code=status.HTTP_200_OK)
+async def get_tabela_a_receber(
+    consulta: FiltrosBI = FiltrosBI(),
+    token: str = Depends(oauth2_scheme)
+):
+
+    """
+    Consulta tabela de a receber usando POST com schema de entrada.
+    Permite consultas mais complexas no futuro.
+    """
+    # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+
+        # ← AQUI usa os campos do schema
+        data_fim = consulta.data_fim or date.today()
+        data_inicio = consulta.data_inicio or (data_fim - timedelta(days=30))
+
+        query= """
+            SELECT
+                datavencto,
+                cliente,
+                cidade,
+                coduf,
+                produto,
+                SUM(vlrsaldo),
+                conta
+            FROM
+                vwfactrc_bi
+            WHERE datavencto >= ? AND datavencto <= ?
+            GROUP BY 
+                datavencto,
+                cliente,
+                cidade,
+                coduf,
+                produto,
+                conta
+            ORDER BY 
+                datavencto DESC
+        """
+
+        params = []
+
+        # Aplicar filtros no WHERE externo (mesma lógica dos outros endpoints)
+        filtros_externos = ""
+        
+        params.extend([data_inicio, data_fim])
+        
+        # Normalizar filtros
+        codfilial = normalize_filter(consulta.codfilial)
+        codcliente = normalize_filter(consulta.codcliente)
+
+        # Aplicar filtros por filial
+        if codfilial:
+            placeholders_filial = ', '.join(['?'] * len(codfilial))
+            filtros_externos += f" AND codfilial IN ({placeholders_filial})"
+            params.extend(codfilial)
+
+        # Aplicar filtros por cliente
+        if codcliente:
+            placeholders_cliente = ', '.join(['?'] * len(codcliente))
+            filtros_externos += f" AND codcliente IN ({placeholders_cliente})"
+            params.extend(codcliente)
+
+
+
+        # Inserir filtros no WHERE externo
+        query = query.replace(
+            "WHERE datavencto >= ? AND datavencto <= ?",
+            f"WHERE datavencto >= ? AND datavencto <= ?{filtros_externos}"
+        )
+
+        cur.execute(query, tuple(params))
+                     # Combina os resultados
+        dados = [
+            {
+                "datavencto": str(row[0]) if row[0] is not None else None,
+                "cliente": str(row[1]) if row[1] is not None else None,
+                "cidade": str(row[2]) if row[2] is not None else None,
+                "coduf": str(row[3]) if row[3] is not None else None,
+                "produto": str(row[4]) if row[4] is not None else None,
+                "a_receber": float(row[5]) if row[5] is not None else 0.0,
+                "conta": str(row[6]) if row[6] is not None else None
+            }
+            for row in cur.fetchall()
+        ]
+              
+
+        if not dados:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum dado encontrado")
+        
+        return dados
