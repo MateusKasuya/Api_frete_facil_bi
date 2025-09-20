@@ -1568,6 +1568,7 @@ async def get_big_numbers_contas_receber(
                 "faturamento": float(faturamento),
                 "a_receber": float(a_receber),
                 "em_atraso": float(em_atraso),
+                "a_receber_total": float(a_receber) + float(em_atraso),
                 "prazo_medio": float(prazo_medio)
             }
         ]
@@ -1672,7 +1673,7 @@ async def get_recebimentos_dia_mes_atual(
             a_receber = float(row[2]) if row[2] is not None else 0.0
             
             # Adiciona os dados do dia
-            dados[dia] = RecebimentosDiaMesAtual(
+            dados[dia] = DadosRecebimentosDiaMesAtual(
                 faturamento=faturamento,
                 a_receber=a_receber
             )
@@ -1709,7 +1710,33 @@ async def get_a_receber_cliente(
         data_fim = consulta.data_fim or date.today()
         data_inicio = consulta.data_inicio or (data_fim - timedelta(days=30))
 
-        query= """
+        # Construir filtros adicionais para aplicar nas queries
+        filtros_adicionais_a_receber = ""
+        filtros_adicionais_em_atraso = ""
+        params_a_receber = [data_inicio, data_fim]
+        params_em_atraso = []
+        
+        # Normalizar filtros
+        codfilial = normalize_filter(consulta.codfilial)
+        codcliente = normalize_filter(consulta.codcliente)
+
+        # Aplicar filtros por filial
+        if codfilial:
+            placeholders_filial = ', '.join(['?'] * len(codfilial))
+            filtros_adicionais_a_receber += f" AND codfilial IN ({placeholders_filial})"
+            filtros_adicionais_em_atraso += f" AND codfilial IN ({placeholders_filial})"
+            params_a_receber.extend(codfilial)
+            params_em_atraso.extend(codfilial)
+
+        # Aplicar filtros por cliente
+        if codcliente:
+            placeholders_cliente = ', '.join(['?'] * len(codcliente))
+            filtros_adicionais_a_receber += f" AND codcliente IN ({placeholders_cliente})"
+            filtros_adicionais_em_atraso += f" AND codcliente IN ({placeholders_cliente})"
+            params_a_receber.extend(codcliente)
+            params_em_atraso.extend(codcliente)
+
+        query= f"""
             SELECT
                 codcliente,
                 cliente,
@@ -1724,8 +1751,18 @@ async def get_a_receber_cliente(
                     datavencto
                 FROM
                     VWFACTRC_BI
+                WHERE condicao_fatura = 'A Receber' AND datavencto >= ? AND datavencto <= ?{filtros_adicionais_a_receber}
+            UNION ALL
+                SELECT
+                    cliente,
+                    vlrsaldo,
+                    codfilial,
+                    codcliente,
+                    datavencto
+                FROM
+                    VWFACTRC_BI
+                WHERE condicao_fatura = 'Em Atraso'{filtros_adicionais_em_atraso}
             ) dados
-            WHERE datavencto >= ? AND datavencto <= ?
             GROUP BY
                 codcliente,
                 cliente
@@ -1733,34 +1770,7 @@ async def get_a_receber_cliente(
                 SUM(vlrsaldo) DESC
         """
 
-        params = []
-
-        # Aplicar filtros no WHERE externo (mesma lógica dos outros endpoints)
-        filtros_externos = ""
-        
-        params.extend([data_inicio, data_fim])
-        
-        # Normalizar filtros
-        codfilial = normalize_filter(consulta.codfilial)
-        codcliente = normalize_filter(consulta.codcliente)
-
-        # Aplicar filtros por filial
-        if codfilial:
-            placeholders_filial = ', '.join(['?'] * len(codfilial))
-            filtros_externos += f" AND codfilial IN ({placeholders_filial})"
-            params.extend(codfilial)
-
-        # Aplicar filtros por cliente
-        if codcliente:
-            placeholders_cliente = ', '.join(['?'] * len(codcliente))
-            filtros_externos += f" AND codcliente IN ({placeholders_cliente})"
-            params.extend(codcliente)
-
-        # Inserir filtros no WHERE externo
-        query = query.replace(
-            "WHERE datavencto >= ? AND datavencto <= ?",
-            f"WHERE datavencto >= ? AND datavencto <= ?{filtros_externos}"
-        )
+        params = params_a_receber + params_em_atraso
 
 
         cur.execute(query, tuple(params))
@@ -1876,6 +1886,507 @@ async def get_tabela_a_receber(
                 "produto": str(row[4]) if row[4] is not None else None,
                 "a_receber": float(row[5]) if row[5] is not None else 0.0,
                 "conta": str(row[6]) if row[6] is not None else None
+            }
+            for row in cur.fetchall()
+        ]
+              
+
+        if not dados:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum dado encontrado")
+        
+        return dados
+
+@router.get("/bi/filtro_fornecedor", tags=["BI"], response_model=List[FiltroFornecedor], status_code=status.HTTP_200_OK)
+async def get_filtro_fornecedor(
+    token: str = Depends(oauth2_scheme)
+):
+
+    """
+        Consulta filtro fornecedor usando GET com schema de entrada.
+    """
+
+  # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+
+        query= """
+            SELECT
+                cgccpfforne,
+                nomefantasia
+            FROM
+                tbfor
+        """
+
+        cur.execute(query)
+
+        dados = [
+            {
+                "codfornecedor": str(row[0]) if row[0] is not None else None,
+                "fornecedor": str(row[1]) if row[1] is not None else None
+            }
+            for row in cur.fetchall()
+        ]
+              
+
+        if not dados:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum dado encontrado")
+        
+        return dados
+
+@router.get("/bi/filtro_transacao", tags=["BI"], response_model=List[FiltroTransacao], status_code=status.HTTP_200_OK)
+async def get_filtro_transacao(
+    token: str = Depends(oauth2_scheme)
+):
+
+    """
+        Consulta filtro transacao usando GET com schema de entrada.
+    """
+
+  # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+
+        query= """
+            SELECT
+	            codtransacao,
+	            descricao
+            FROM
+                tbhis
+        """
+
+        cur.execute(query)
+
+        dados = [
+            {
+                "codtransacao": str(row[0]) if row[0] is not None else None,
+                "transacao": str(row[1]) if row[1] is not None else None
+            }
+            for row in cur.fetchall()
+        ]
+              
+
+        if not dados:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum dado encontrado")
+        
+        return dados
+
+@router.post("/bi/big_numbers_contas_pagar", tags=["BI"], response_model=List[BigNumbersContasPagar], status_code=status.HTTP_200_OK)
+async def get_big_numbers_contas_pagar(
+    consulta: FiltrosBI = FiltrosBI(),
+    token: str = Depends(oauth2_scheme)
+):
+
+    """
+    Consulta big numbers contas pagar usando POST com schema de entrada.
+    Permite consultas mais complexas no futuro.
+    """
+    # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+
+        # ← AQUI usa os campos do schema
+        data_fim = consulta.data_fim or date.today()
+        data_inicio = consulta.data_inicio or (data_fim - timedelta(days=30))
+
+        # Normalizar filtros para aplicar em todas as queries
+        codfornecedor = normalize_filter(consulta.codfornecedor)
+        codtransacao = normalize_filter(consulta.codtransacao)
+
+        # Construir filtros adicionais para aplicar nas queries
+        filtros_adicionais = ""
+        params_filtros = []
+
+        if codfornecedor:
+            placeholders_fornecedor = ', '.join(['?'] * len(codfornecedor))
+            filtros_adicionais += f" AND codfornecedor IN ({placeholders_fornecedor})"
+            params_filtros.extend(codfornecedor)
+
+        if codtransacao:
+            placeholders_transacao = ', '.join(['?'] * len(codtransacao))
+            filtros_adicionais += f" AND codtransacao IN ({placeholders_transacao})"
+            params_filtros.extend(codtransacao)
+
+        # 1. FATURAMENTO: Filtrado por período de recebimento
+        query_pago = f"""
+            SELECT
+	            COALESCE(SUM(vlrpago), 0) AS pago
+            FROM vwcptit_bi
+            WHERE datamovto >= ? AND datamovto <= ?{filtros_adicionais}
+        """
+        params_pago = [data_inicio, data_fim] + params_filtros
+
+        # 2. A PAGAR: Filtrado por período de vencimento
+        query_a_pagar = f"""
+            SELECT
+	            COALESCE(SUM(vlrsaldo), 0) AS a_pagar
+            FROM vwcptit_bi
+            WHERE condicao_fatura = 'A Pagar'
+              AND datavencto >= ? AND datavencto <= ?{filtros_adicionais}
+        """
+        params_a_pagar = [data_inicio, data_fim] + params_filtros
+
+        # 3. EM ATRASO: SEM filtro de data (sempre atual)
+        query_em_atraso = f"""
+            SELECT COALESCE(SUM(vlrsaldo), 0) AS em_atraso
+            FROM vwcptit_bi
+            WHERE condicao_fatura = 'Em Atraso'{filtros_adicionais}
+        """
+        params_em_atraso = params_filtros
+
+        # Executar queries separadamente
+        cur.execute(query_pago, tuple(params_pago))
+        pago = cur.fetchone()[0] or 0.0
+
+        cur.execute(query_a_pagar, tuple(params_a_pagar))
+        a_pagar = cur.fetchone()[0] or 0.0
+
+        cur.execute(query_em_atraso, tuple(params_em_atraso))
+        em_atraso = cur.fetchone()[0] or 0.0
+
+        # Retornar dados combinados
+        dados = [
+            {
+                "pago": float(pago),
+                "a_pagar": float(a_pagar),
+                "em_atraso": float(em_atraso),
+                "a_pagar_total": float(a_pagar) + float(em_atraso)
+            }
+        ]
+        
+        return dados
+
+@router.post('/bi/contas_pagar_dia_mes_atual', tags=["BI"], response_model=ContasPagarDiaMesAtual, status_code=status.HTTP_200_OK)
+async def get_contas_pagar_dia_mes_atual(
+    consulta: FiltrosBI = FiltrosBI(),
+    token: str = Depends(oauth2_scheme)
+):
+    """
+    Consulta Grafico dia e mes atual de contas pagar usando POST com schema de entrada.
+    Permite consultas mais complexas no futuro.
+    """
+    # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+        query = """
+                    SELECT
+                        dia,
+                        SUM(vlrpago),
+                        SUM(a_pagar)
+                    FROM
+                        (
+                        SELECT
+                            dia_movto AS dia,
+                            vlrpago,
+                            0 AS a_pagar,
+                            codfornecedor,
+                            codtransacao
+                        FROM
+                            VWCPTIT_BI
+                        WHERE
+                            ano_movto = EXTRACT(YEAR FROM CURRENT_TIMESTAMP)
+                            AND mes_numero_movto = EXTRACT(MONTH FROM CURRENT_TIMESTAMP)
+                    UNION ALL
+                        SELECT
+                            dia_vencto AS dia,
+                            0 AS vlrpago,
+                            vlrsaldo AS a_pagar,
+                            codfornecedor,
+                            codtransacao
+                        FROM
+                            VWCPTIT_BI
+                        WHERE
+                            ano_vencto = EXTRACT(YEAR FROM CURRENT_TIMESTAMP)
+                            AND mes_numero_vencto = EXTRACT(MONTH FROM CURRENT_TIMESTAMP)
+                            AND condicao_fatura = 'A Pagar'
+                    ) dados
+                    WHERE 1=1
+                    GROUP BY
+                        dia
+                    ORDER BY
+                        dia
+        """
+
+        params = []
+
+        # Aplicar filtros no WHERE externo (após o UNION) - igual kpi_mes_ano
+        filtros_externos = ""
+        
+        # Normalizar filtros
+        codfornecedor = normalize_filter(consulta.codfornecedor)
+        codtransacao = normalize_filter(consulta.codtransacao)
+
+        # Aplicar filtros por filial
+        if codfornecedor:
+            placeholders_fornecedor = ', '.join(['?'] * len(codfornecedor))
+            filtros_externos += f" AND codfornecedor IN ({placeholders_fornecedor})"
+            params.extend(codfornecedor)
+
+        # Aplicar filtros por cliente
+        if codtransacao:
+            placeholders_codtransacao = ', '.join(['?'] * len(codtransacao))
+            filtros_externos += f" AND codtransacao IN ({placeholders_codtransacao})"
+            params.extend(codtransacao)
+
+        # Inserir filtros no WHERE externo
+        query = query.replace(
+            "WHERE 1=1",
+            f"WHERE 1=1{filtros_externos}"
+        )
+
+        cur.execute(query, tuple(params))
+
+        # Dicionário para armazenar os dados organizados por dia
+        dados = {}
+
+        for row in cur.fetchall():
+            dia = str(int(row[0])) if row[0] is not None else "0"
+            pago = float(row[1]) if row[1] is not None else 0.0
+            a_pagar = float(row[2]) if row[2] is not None else 0.0
+            
+            # Adiciona os dados do dia
+            dados[dia] = DadosContasPagarDiaMesAtual(
+                pago=pago,
+                a_pagar=a_pagar
+            )
+
+        if not dados:
+            return {}
+        
+        return dados
+
+@router.post("/bi/a_pagar_fornecedor", tags=["BI"], response_model=APagarFornecedor, status_code=status.HTTP_200_OK)
+async def get_a_pagar_fornecedor(
+    consulta: FiltrosBI = FiltrosBI(),
+    token: str = Depends(oauth2_scheme)
+):
+
+    """
+    Consulta a pagar fornecedor usando POST com schema de entrada.
+    Permite consultas mais complexas no futuro.
+    """
+    # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+
+        # ← AQUI usa os campos do schema
+        data_fim = consulta.data_fim or date.today()
+        data_inicio = consulta.data_inicio or (data_fim - timedelta(days=30))
+
+        # Construir filtros adicionais para aplicar nas queries
+        filtros_adicionais_a_pagar = ""
+        filtros_adicionais_em_atraso = ""
+        params_a_pagar = [data_inicio, data_fim]
+        params_em_atraso = []
+        
+        # Normalizar filtros
+        codfornecedor = normalize_filter(consulta.codfornecedor)
+        codtransacao = normalize_filter(consulta.codtransacao)
+
+        # Aplicar filtros por fornecedor
+        if codfornecedor:
+            placeholders_fornecedor = ', '.join(['?'] * len(codfornecedor))
+            filtros_adicionais_a_pagar += f" AND codfornecedor IN ({placeholders_fornecedor})"
+            filtros_adicionais_em_atraso += f" AND codfornecedor IN ({placeholders_fornecedor})"
+            params_a_pagar.extend(codfornecedor)
+            params_em_atraso.extend(codfornecedor)
+
+        # Aplicar filtros por transacao
+        if codtransacao:
+            placeholders_transacao = ', '.join(['?'] * len(codtransacao))
+            filtros_adicionais_a_pagar += f" AND codtransacao IN ({placeholders_transacao})"
+            filtros_adicionais_em_atraso += f" AND codtransacao IN ({placeholders_transacao})"
+            params_a_pagar.extend(codtransacao)
+            params_em_atraso.extend(codtransacao)
+
+        query= f"""
+               SELECT
+                    codfornecedor,
+                    fornecedor,
+                    SUM(vlrsaldo)
+                FROM
+                    (
+                    SELECT
+                        fornecedor,
+                        vlrsaldo,
+                        codfornecedor,
+                        codtransacao,
+                        datavencto
+                    FROM
+                        VWCPTIT_BI
+                    WHERE condicao_fatura = 'A Pagar' AND datavencto >= ? AND datavencto <= ?{filtros_adicionais_a_pagar}
+                UNION ALL
+                    SELECT
+                        fornecedor,
+                        vlrsaldo,
+                        codfornecedor,
+                        codtransacao,
+                        datavencto
+                    FROM
+                        VWCPTIT_BI
+                    WHERE condicao_fatura = 'Em Atraso'{filtros_adicionais_em_atraso}
+                            ) dados
+                GROUP BY
+                    codfornecedor,
+                    fornecedor
+                ORDER BY
+                    SUM(vlrsaldo) DESC
+        """
+
+        params = params_a_pagar + params_em_atraso
+
+
+        cur.execute(query, tuple(params))
+
+                # Dicionário para armazenar os dados organizados por cliente
+        dados = {}
+
+        for row in cur.fetchall():
+            codfornecedor = str(row[0]) if row[0] is not None else None
+            fornecedor = str(row[1]) if row[1] is not None else None
+            a_pagar = float(row[2]) if row[2] is not None else 0.0
+            
+            # Adiciona os dados do cliente
+            dados[codfornecedor] = DadosAPagarFornecedor(
+                fornecedor=fornecedor,
+                a_pagar=a_pagar
+            )
+
+        if not dados:
+            return {}
+        
+        return dados
+
+@router.post("/bi/tabela_a_pagar", tags=["BI"], response_model=List[TabelaAPagar], status_code=status.HTTP_200_OK)
+async def get_tabela_a_pagar(
+    consulta: FiltrosBI = FiltrosBI(),
+    token: str = Depends(oauth2_scheme)
+):
+
+    """
+    Consulta tabela de a pagar usando POST com schema de entrada.
+    Permite consultas mais complexas no futuro.
+    """
+    # Verifica o token
+    payload = decode_access_token(token)
+    idempresa = payload.get("empresa")
+
+    if not idempresa:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID da empresa não encontrado no token")
+    
+    # Obtém os dados de conexão do Firebird
+    conn_data = await get_firebird_connection_data(idempresa)
+
+    # Usa o context manager para gerenciar a conexão automaticamente
+    with firebird_connection_manager(conn_data['ipbd'], conn_data['portabd'], conn_data['caminhobd']) as (con, cur):
+
+        # ← AQUI usa os campos do schema
+        data_fim = consulta.data_fim or date.today()
+        data_inicio = consulta.data_inicio or (data_fim - timedelta(days=30))
+
+        query= """
+            SELECT
+                datavencto,
+                fornecedor,
+                transacao,
+                SUM(vlrsaldo),
+                conta
+            FROM
+                vwcptit_bi
+                WHERE datavencto >= ? AND datavencto <= ?
+            GROUP BY
+                datavencto,
+                fornecedor,
+                transacao,
+                conta
+            ORDER BY
+                datavencto DESC
+        """
+
+        params = []
+
+        # Aplicar filtros no WHERE externo (mesma lógica dos outros endpoints)
+        filtros_externos = ""
+        
+        params.extend([data_inicio, data_fim])
+        
+        # Normalizar filtros
+        codfornecedor = normalize_filter(consulta.codfornecedor)
+        codtransacao = normalize_filter(consulta.codtransacao)
+
+        # Aplicar filtros por filial
+        if codfornecedor:
+            placeholders_fornecedor = ', '.join(['?'] * len(codfornecedor))
+            filtros_externos += f" AND codfornecedor IN ({placeholders_fornecedor})"
+            params.extend(codfornecedor)
+
+        # Aplicar filtros por cliente
+        if codtransacao:
+            placeholders_transacao = ', '.join(['?'] * len(codtransacao))
+            filtros_externos += f" AND codtransacao IN ({placeholders_transacao})"
+            params.extend(codtransacao)
+
+
+
+        # Inserir filtros no WHERE externo
+        query = query.replace(
+            "WHERE datavencto >= ? AND datavencto <= ?",
+            f"WHERE datavencto >= ? AND datavencto <= ?{filtros_externos}"
+        )
+
+        cur.execute(query, tuple(params))
+                     # Combina os resultados
+        dados = [
+            {
+                "datavencto": str(row[0]) if row[0] is not None else None,
+                "fornecedor": str(row[1]) if row[1] is not None else None,
+                "transacao": str(row[2]) if row[2] is not None else None,
+                "a_pagar": float(row[3]) if row[3] is not None else 0.0,
+                "conta": str(row[4]) if row[4] is not None else None
             }
             for row in cur.fetchall()
         ]

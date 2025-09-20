@@ -13,7 +13,6 @@ SELECT
 	cid.regiao,
 	f.codpro,
 	p.nome AS produto,
-	f.dataemissao,
 	f.datavencto,
 	f.datarecbto,
 		CASE
@@ -37,7 +36,6 @@ SELECT
 	EXTRACT(MONTH FROM f.datavencto) mes_numero_vencto,
 	EXTRACT(YEAR FROM f.datavencto) ano_vencto,
 	f.datarecbto - f.dataemissao AS dias_recebimento,
-	f.vlrfatura,
 	f.vlrrecbto,
 	f.vlrsaldo,
 	CASE
@@ -47,7 +45,6 @@ SELECT
 		ELSE 'A Receber'
 	END AS condicao_fatura,
 	f.contareduz,
-	f.codtransacao,
 	cta.nomeconta AS conta
 FROM
 	factrc f

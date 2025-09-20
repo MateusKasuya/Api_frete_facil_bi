@@ -19,6 +19,10 @@ class FiltrosBI(BaseModel):
     
     regiao: Optional[Union[List[str], str]] = Field(None, description="Nome(s) da região")
 
+    # Filtros cptit
+    codfornecedor: Optional[Union[List[str], str]] = Field(None, description="Código(s) do fornecedor")
+    codtransacao: Optional[Union[List[int], int]] = Field(None, description="Código(s) da transação")
+
 # Schema para resposta (saída) 
 class BigNumbers(BaseModel):
     faturamento: float
@@ -122,8 +126,9 @@ class BigNumbersContasReceber(BaseModel):
     faturamento: float
     a_receber: float
     em_atraso: float
+    a_receber_total: float
     prazo_medio: float
-    
+        
 class DadosRecebimentosDiaMesAtual(BaseModel):
     faturamento: float
     a_receber: float
@@ -146,4 +151,40 @@ class TabelaAReceber(BaseModel):
     coduf: str
     produto: str
     a_receber: float
+    conta: str
+
+class FiltroFornecedor(BaseModel):
+    codfornecedor: str
+    fornecedor: str
+
+class FiltroTransacao(BaseModel):
+    codtransacao: str
+    transacao: str
+
+class BigNumbersContasPagar(BaseModel):
+    pago: float
+    a_pagar: float
+    em_atraso: float
+    a_pagar_total: float
+
+class DadosContasPagarDiaMesAtual(BaseModel):
+    pago: float
+    a_pagar: float
+
+# Schema para a estrutura aninhada por dia
+class ContasPagarDiaMesAtual(RootModel[Dict[str, DadosContasPagarDiaMesAtual]]):
+    pass
+
+class DadosAPagarFornecedor(BaseModel):
+    fornecedor: str
+    a_pagar: float
+# Schema para a estrutura aninhada por dia
+class APagarFornecedor(RootModel[Dict[str, DadosAPagarFornecedor]]):
+    pass
+
+class TabelaAPagar(BaseModel):
+    datavencto: date
+    fornecedor: str
+    transacao: str
+    a_pagar: float
     conta: str
